@@ -3,82 +3,108 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-def ler_parquet(parquet_file):
-    """Lê um arquivo Parquet e retorna um DataFrame Pandas.  Trata erros de arquivo não encontrado ou vazio."""
+def carregar_dados(caminho_parquet: str) -> pd.DataFrame:
+    """Carrega os dados de um arquivo Parquet e trata possíveis erros.
+
+    Args:
+        caminho_parquet (str): Caminho para o arquivo Parquet.
+
+    Returns:
+        pd.DataFrame: DataFrame com os dados, ou None caso ocorra erro.
+    """
     try:
-        df = pd.read_parquet(parquet_file)
+        df = pd.read_parquet(caminho_parquet)
         if df.empty:
             raise pd.errors.EmptyDataError("Arquivo Parquet está vazio.")
         return df
     except FileNotFoundError:
-        raise FileNotFoundError(f"Arquivo Parquet '{parquet_file}' não encontrado.")
+        print(f"Erro: Arquivo Parquet não encontrado em {caminho_parquet}")
+        return None
     except pd.errors.EmptyDataError as e:
-        raise pd.errors.EmptyDataError(f"Erro: {e}")
-    except Exception as e:
-        raise Exception(f"Erro inesperado ao ler o arquivo Parquet: {e}")
-
-
-def plotar_evolucao_temporal(df):
-    """Gera um gráfico de linha mostrando a evolução temporal das despesas por tipo."""
-    df['dataDocumento'] = pd.to_datetime(df['dataDocumento'])
-    df_temp = df.groupby([pd.Grouper(key='dataDocumento', freq='M'), 'tipoDespesa'])['total_despesas'].sum().reset_index()
-    plt.figure(figsize=(15, 6))
-    sns.lineplot(data=df_temp, x='dataDocumento', y='total_despesas', hue='tipoDespesa')
-    plt.title('Evolução Temporal das Despesas por Tipo')
-    plt.xlabel('Data')
-    plt.ylabel('Total de Despesas')
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.show()
-
-
-def plotar_ranking_fornecedores(df, delimitador=';'):
-    """Gera um gráfico de barras mostrando o ranking dos fornecedores com maiores gastos."""
-    try:
-        df['fornecedores'] = df['fornecedores'].str.split(delimitador)
-        df_explodido = df.explode('fornecedores')
-        df_fornecedores = df_explodido.groupby('fornecedores')['total_despesas'].sum().reset_index().sort_values(by='total_despesas', ascending=False)
-
-        plt.figure(figsize=(12, 6))
-        sns.barplot(data=df_fornecedores.head(10), x='fornecedores', y='total_despesas')
-        plt.title('Top 10 Fornecedores com Maiores Gastos')
-        plt.xlabel('Fornecedor')
-        plt.ylabel('Total de Despesas')
-        plt.xticks(rotation=45, ha='right')
-        plt.tight_layout()
-        plt.show()
-        print("Top 10 Fornecedores (Tabela):\
-", df_fornecedores.head(10))
-    except KeyError as e:
-        raise KeyError(f"Coluna '{e.args[0]}' não encontrada no DataFrame.")
-    except Exception as e:
-        raise Exception(f"Erro inesperado ao processar dados de fornecedores: {e}")
-
-
-def plotar_distribuicao_despesas(df):
-    """Gera um boxplot mostrando a distribuição das despesas por tipo e outliers."""
-    plt.figure(figsize=(12, 6))
-    sns.boxplot(x='tipoDespesa', y='total_despesas', data=df)
-    plt.title('Distribuição das Despesas por Tipo e Outliers')
-    plt.xlabel('Tipo de Despesa')
-    plt.ylabel('Total de Despesas')
-    plt.xticks(rotation=45, ha='right')
-    plt.tight_layout()
-    plt.show()
-
-
-def analisar_despesas(parquet_file, delimitador_fornecedores=';'):
-    """Analisa um arquivo Parquet contendo dados de despesas e gera gráficos."""
-    try:
-        df = ler_parquet(parquet_file)
-        plotar_evolucao_temporal(df)
-        plotar_ranking_fornecedores(df, delimitador_fornecedores)
-        plotar_distribuicao_despesas(df)
-    except (FileNotFoundError, pd.errors.EmptyDataError, KeyError, Exception) as e:
         print(f"Erro: {e}")
+        return None
+    except Exception as e:
+        print(f"Erro ao ler o arquivo Parquet: {e}")
+        return None
+
+def analisar_evolucao_temporal(df: pd.DataFrame) -> plt.Figure:
+    """Analisa a evolução temporal das despesas por tipo.
+
+    Args:
+        df (pd.DataFrame): DataFrame com os dados.
+
+    Returns:
+        plt.Figure: Figura com o gráfico.
+    """
+    df['dataDocumento'] = pd.to_datetime(df['dataDocumento'])
+    df_tempo = df.groupby(['dataDocumento', 'tipoDespesa'])['total_despesas'].sum().reset_index()
+    fig, ax = plt.subplots(figsize=(12, 6))
+    sns.lineplot(data=df_tempo, x='dataDocumento', y='total_despesas', hue='tipoDespesa', ax=ax)
+    ax.set_title('Evolução Temporal das Despesas por Tipo')
+    ax.set_xlabel('Data')
+    ax.set_ylabel('Total de Despesas')
+    ax.tick_params(axis='x', rotation=45)
+    plt.tight_layout()
+    return fig
+
+
+def analisar_distribuicao_fornecedores(df: pd.DataFrame) -> plt.Figure:
+    """Analisa a distribuição das despesas por fornecedor.
+
+    Args:
+        df (pd.DataFrame): DataFrame com os dados.
+
+    Returns:
+        plt.Figure: Figura com o gráfico.
+    """
+    df_fornecedor = df.groupby('fornecedor')['total_despesas'].sum().reset_index()
+    df_fornecedor = df_fornecedor.sort_values(by='total_despesas', ascending=False).head(20)
+    fig, ax = plt.subplots(figsize=(12, 6))
+    sns.barplot(data=df_fornecedor, x='fornecedor', y='total_despesas', ax=ax)
+    ax.set_title('Distribuição das Despesas por Fornecedor (Top 20)')
+    ax.set_xlabel('Fornecedor')
+    ax.set_ylabel('Total de Despesas')
+    ax.tick_params(axis='x', rotation=90)
+    plt.tight_layout()
+    return fig
+
+
+def analisar_correlacao_tipos_despesa(df: pd.DataFrame) -> plt.Figure:
+    """Analisa a correlação entre tipos de despesa (simplificado).
+
+    Args:
+        df (pd.DataFrame): DataFrame com os dados.
+
+    Returns:
+        plt.Figure: Figura com o gráfico.
+    """
+    df_correlacao = df.groupby('tipoDespesa')['total_despesas'].sum().unstack().fillna(0)
+    fig, ax = plt.subplots(figsize=(8, 6))
+    sns.heatmap(df_correlacao.corr(), annot=True, cmap='coolwarm', fmt=".2f", ax=ax)
+    ax.set_title('Matriz de Correlação entre Tipos de Despesa (Simplificada)')
+    return fig
+
+
+def analisar_despesas_deputados(caminho_parquet: str) -> tuple:
+    """Analisa dados de despesas de deputados e gera gráficos."""
+    df = carregar_dados(caminho_parquet)
+    if df is None:
+        return None, None, None
+
+    fig_tempo = analisar_evolucao_temporal(df)
+    fig_fornecedor = analisar_distribuicao_fornecedores(df)
+    fig_correlacao = analisar_correlacao_tipos_despesa(df)
+
+    return fig_tempo, fig_fornecedor, fig_correlacao
 
 
 # Exemplo de uso:
-# Substitua 'seu_arquivo.parquet' pelo caminho do seu arquivo.  
-# Ajuste o delimitador se necessário.
-analisar_despesas('data/serie_despesas_diarias_deputados.parquet', delimitador_fornecedores=',') #Exemplo usando vírgula como delimitador.
+fig_tempo, fig_fornecedor, fig_correlacao = analisar_despesas_deputados("data/serie_despesas_diarias_deputados.parquet")
+
+if fig_tempo:
+    fig_tempo.show()
+if fig_fornecedor:
+    fig_fornecedor.show()
+if fig_correlacao:
+    fig_correlacao.show()
+
