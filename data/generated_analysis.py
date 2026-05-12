@@ -3,6 +3,23 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+
+def _normalizar_coluna_fornecedor(df: pd.DataFrame) -> pd.Series:
+    coluna_fornecedor = 'fornecedor' if 'fornecedor' in df.columns else 'fornecedores'
+    fornecedores = df[coluna_fornecedor]
+
+    def extrair_nome(valor):
+        if isinstance(valor, (list, tuple, pd.Series)):
+            return valor[0] if len(valor) > 0 else None
+        if hasattr(valor, 'tolist') and not isinstance(valor, str):
+            convertido = valor.tolist()
+            if isinstance(convertido, list):
+                return convertido[0] if convertido else None
+            return convertido
+        return valor
+
+    return fornecedores.apply(extrair_nome)
+
 def carregar_dados(caminho_parquet: str) -> pd.DataFrame:
     """Carrega os dados de um arquivo Parquet e trata possíveis erros.
 
@@ -57,10 +74,11 @@ def analisar_distribuicao_fornecedores(df: pd.DataFrame) -> plt.Figure:
     Returns:
         plt.Figure: Figura com o gráfico.
     """
-    df_fornecedor = df.groupby('fornecedor')['total_despesas'].sum().reset_index()
+    coluna_fornecedor = _normalizar_coluna_fornecedor(df)
+    df_fornecedor = df.assign(fornecedor_normalizado=coluna_fornecedor).groupby('fornecedor_normalizado')['total_despesas'].sum().reset_index()
     df_fornecedor = df_fornecedor.sort_values(by='total_despesas', ascending=False).head(20)
     fig, ax = plt.subplots(figsize=(12, 6))
-    sns.barplot(data=df_fornecedor, x='fornecedor', y='total_despesas', ax=ax)
+    sns.barplot(data=df_fornecedor, x='fornecedor_normalizado', y='total_despesas', ax=ax)
     ax.set_title('Distribuição das Despesas por Fornecedor (Top 20)')
     ax.set_xlabel('Fornecedor')
     ax.set_ylabel('Total de Despesas')
@@ -78,7 +96,14 @@ def analisar_correlacao_tipos_despesa(df: pd.DataFrame) -> plt.Figure:
     Returns:
         plt.Figure: Figura com o gráfico.
     """
-    df_correlacao = df.groupby('tipoDespesa')['total_despesas'].sum().unstack().fillna(0)
+    df['dataDocumento'] = pd.to_datetime(df['dataDocumento'])
+    df_correlacao = df.pivot_table(
+        index='dataDocumento',
+        columns='tipoDespesa',
+        values='total_despesas',
+        aggfunc='sum',
+        fill_value=0,
+    )
     fig, ax = plt.subplots(figsize=(8, 6))
     sns.heatmap(df_correlacao.corr(), annot=True, cmap='coolwarm', fmt=".2f", ax=ax)
     ax.set_title('Matriz de Correlação entre Tipos de Despesa (Simplificada)')
@@ -96,15 +121,13 @@ def analisar_despesas_deputados(caminho_parquet: str) -> tuple:
     fig_correlacao = analisar_correlacao_tipos_despesa(df)
 
     return fig_tempo, fig_fornecedor, fig_correlacao
+if __name__ == "__main__":
+    fig_tempo, fig_fornecedor, fig_correlacao = analisar_despesas_deputados("data/serie_despesas_diarias_deputados.parquet")
 
-
-# Exemplo de uso:
-fig_tempo, fig_fornecedor, fig_correlacao = analisar_despesas_deputados("data/serie_despesas_diarias_deputados.parquet")
-
-if fig_tempo:
-    fig_tempo.show()
-if fig_fornecedor:
-    fig_fornecedor.show()
-if fig_correlacao:
-    fig_correlacao.show()
+    if fig_tempo:
+        fig_tempo.show()
+    if fig_fornecedor:
+        fig_fornecedor.show()
+    if fig_correlacao:
+        fig_correlacao.show()
 
