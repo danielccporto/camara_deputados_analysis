@@ -24,6 +24,11 @@ from PIL import Image
 from pathlib import Path
 import plotly.express as px
 
+try:
+    from assistant import render_assistant_tab
+except Exception:
+    render_assistant_tab = None
+
 
 # ============================================================================
 # CONFIGURAÇÃO DA PÁGINA
@@ -67,14 +72,28 @@ def carregar_config():
     """Carrega configurações do arquivo config.yaml"""
     try:
         with open("data/config.yaml", "r", encoding="utf-8") as f:
-            config = yaml.safe_load(f)
-        return config
+            # tentamos ler como UTF-8 normal e como UTF-8-SIG (remove BOM)
+            text = f.read()
+        try:
+            config = yaml.safe_load(text)
+        except Exception:
+            # tentar com BOM-friendly
+            try:
+                config = yaml.safe_load(text.encode('utf-8').decode('utf-8-sig'))
+            except Exception:
+                # fallback resiliente: extrai overview_summary manualmente
+                if "overview_summary:" in text:
+                    resumo = text.split("overview_summary:", 1)[1]
+                    resumo = resumo.lstrip().lstrip("|").strip()
+                    return {"overview_summary": resumo}
+                return {}
+        return config or {}
     except FileNotFoundError:
-        st.error("❌ Arquivo config.yaml não encontrado em data/")
-        return None
+        st.info("ℹ️ Arquivo config.yaml não encontrado em data/ — use data/config.yaml para configurar a visão geral.")
+        return {}
     except Exception as e:
-        st.error(f"❌ Erro ao carregar config.yaml: {e}")
-        return None
+        st.error("❌ Erro ao carregar data/config.yaml — verifique permissões e codificação.")
+        return {}
 
 
 @st.cache_data
@@ -113,8 +132,16 @@ def carregar_gráfico():
 def carregar_despesas():
     """Carrega dados de despesas dos deputados."""
     try:
-        df = pd.read_parquet("data/serie_despesas_diarias_deputados.parquet")
-        df['dataDocumento'] = pd.to_datetime(df['dataDocumento'])
+        caminho_detalhado = Path("data/despesas_deputados_detalhadas.parquet")
+        caminho_agregado = Path("data/serie_despesas_diarias_deputados.parquet")
+
+        if caminho_detalhado.exists():
+            df = pd.read_parquet(caminho_detalhado)
+        else:
+            df = pd.read_parquet(caminho_agregado)
+
+        if 'dataDocumento' in df.columns:
+            df['dataDocumento'] = pd.to_datetime(df['dataDocumento'], errors='coerce')
         return df
     except FileNotFoundError:
         st.warning("Arquivo de despesas não encontrado.")
@@ -147,7 +174,15 @@ def carregar_proposicoes():
     """Carrega dados de proposições legislativas."""
     try:
         df = pd.read_parquet("data/proposicoes_deputados.parquet")
-        df['dataApresentacao'] = pd.to_datetime(df['dataApresentacao'])
+        # Nem sempre a coluna de data vem com o nome esperado; fazer verificação
+        if 'dataApresentacao' in df.columns:
+            df['dataApresentacao'] = pd.to_datetime(df['dataApresentacao'], errors='coerce')
+        else:
+            # tentar alternativas comuns
+            for alt in ('data_apresentacao', 'dataApresentacao_iso', 'data'):
+                if alt in df.columns:
+                    df['dataApresentacao'] = pd.to_datetime(df[alt], errors='coerce')
+                    break
         return df
     except FileNotFoundError:
         st.warning("Arquivo de proposições não encontrado.")
@@ -175,7 +210,7 @@ def carregar_sumarizacoes():
 # ============================================================================
 # NAVEGAÇÃO COM ABAS
 # ============================================================================
-tab1, tab2, tab3 = st.tabs(["📊 Overview", "💰 Despesas", "📜 Proposições"])
+tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "💰 Despesas", "📜 Proposições", "🤖 Assistente"])
 
 # ============================================================================
 # ABA 1: OVERVIEW
@@ -274,53 +309,104 @@ with tab2:
         st.divider()
     
     if df_despesas is not None:
-        # Seleção do deputado
-        deputados = sorted(df_despesas.get('nomeParlamentar', []))
-        if len(deputados) == 0:
-            # Tenta 'nome' se 'nomeParlamentar' não existir
-            deputados = sorted(df_despesas.columns.tolist())
-        
-        deputado_selecionado = st.selectbox(
-            "Selecione um deputado:",
-            deputados if deputados else ["Sem dados"],
-            key="despesas_deputado"
-        )
-        
-        # Filtrar dados do deputado (tentar múltiplas colunas)
-        df_deputado = None
-        for col in ['nomeParlamentar', 'nome', 'deputado']:
-            if col in df_despesas.columns:
-                df_deputado = df_despesas[df_despesas[col] == deputado_selecionado].copy()
-                if not df_deputado.empty:
-                    break
-        
-        if df_deputado is None or df_deputado.empty:
-            st.warning(f"Sem dados de despesas para {deputado_selecionado}")
-        else:
-            # Gráfico de série temporal
+        if 'total_despesas' in df_despesas.columns and not df_despesas['total_despesas'].empty:
+            total_geral = float(df_despesas['total_despesas'].sum())
+            tipo_top = "N/A"
             if 'tipoDespesa' in df_despesas.columns:
-                df_série = df_deputado.sort_values('dataDocumento').groupby(['dataDocumento', 'tipoDespesa'])['total_despesas'].sum().reset_index()
-                
-                fig = px.line(
-                    df_série,
+                por_tipo = df_despesas.groupby('tipoDespesa', dropna=False)['total_despesas'].sum().sort_values(ascending=False)
+                if not por_tipo.empty:
+                    tipo_top = str(por_tipo.index[0])
+
+            periodo = "N/A"
+            if 'dataDocumento' in df_despesas.columns:
+                datas_validas = df_despesas['dataDocumento'].dropna()
+                if not datas_validas.empty:
+                    periodo = f"{datas_validas.min().date()} ate {datas_validas.max().date()}"
+
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Total Geral (R$)", f"{total_geral:,.2f}")
+            m2.metric("Tipo Mais Relevante", tipo_top)
+            m3.metric("Periodo", periodo)
+            st.divider()
+
+        colunas_nome = ['nomeDeputado', 'nomeParlamentar', 'nome', 'deputado']
+        coluna_deputado = next((col for col in colunas_nome if col in df_despesas.columns), None)
+
+        if coluna_deputado is None:
+            st.info("Base agregada detectada: exibindo analise geral de despesas.")
+
+            if {'dataDocumento', 'total_despesas'}.issubset(df_despesas.columns):
+                serie_tempo = (
+                    df_despesas.groupby('dataDocumento', dropna=False)['total_despesas']
+                    .sum()
+                    .reset_index()
+                    .sort_values('dataDocumento')
+                )
+                fig_tempo = px.line(
+                    serie_tempo,
                     x='dataDocumento',
                     y='total_despesas',
-                    color='tipoDespesa',
-                    title=f"Série Temporal de Despesas - {deputado_selecionado}",
-                    labels={'dataDocumento': 'Data', 'total_despesas': 'Total de Despesas (R$)', 'tipoDespesa': 'Tipo de Despesa'},
-                    markers=True
+                    title='Evolucao temporal das despesas agregadas',
+                    labels={'dataDocumento': 'Data', 'total_despesas': 'Total de Despesas (R$)'},
+                    markers=True,
                 )
-                fig.update_layout(hovermode='x unified', height=500)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig_tempo, use_container_width=True)
+
+            if {'tipoDespesa', 'total_despesas'}.issubset(df_despesas.columns):
+                st.subheader("📊 Top tipos de despesa")
+                top_tipos = (
+                    df_despesas.groupby('tipoDespesa', dropna=False)['total_despesas']
+                    .sum()
+                    .sort_values(ascending=False)
+                    .head(10)
+                    .reset_index()
+                )
+                fig_tipos = px.bar(
+                    top_tipos,
+                    x='tipoDespesa',
+                    y='total_despesas',
+                    title='Top 10 tipos de despesa (valor total)',
+                    labels={'tipoDespesa': 'Tipo de Despesa', 'total_despesas': 'Total de Despesas (R$)'},
+                )
+                st.plotly_chart(fig_tipos, use_container_width=True)
+        else:
+            deputados = sorted(df_despesas[coluna_deputado].dropna().astype(str).unique().tolist())
+            deputado_selecionado = st.selectbox(
+                "Selecione um deputado:",
+                deputados if deputados else ["Sem dados"],
+                key="despesas_deputado"
+            )
+
+            df_deputado = df_despesas[df_despesas[coluna_deputado].astype(str) == str(deputado_selecionado)].copy()
+
+            if df_deputado.empty:
+                st.warning(f"Sem dados de despesas para {deputado_selecionado}")
             else:
-                st.warning("Coluna 'tipoDespesa' não encontrada")
-            
-            # Tabela resumida
-            st.subheader("📊 Resumo por Tipo de Despesa")
-            if 'tipoDespesa' in df_despesas.columns:
-                resumo = df_deputado.groupby('tipoDespesa')['total_despesas'].agg(['sum', 'mean']).round(2)
-                resumo.columns = ['Total (R$)', 'Média (R$)']
-                st.dataframe(resumo, use_container_width=True)
+                if {'dataDocumento', 'tipoDespesa', 'total_despesas'}.issubset(df_deputado.columns):
+                    df_serie = (
+                        df_deputado.sort_values('dataDocumento')
+                        .groupby(['dataDocumento', 'tipoDespesa'], dropna=False)['total_despesas']
+                        .sum()
+                        .reset_index()
+                    )
+
+                    fig = px.line(
+                        df_serie,
+                        x='dataDocumento',
+                        y='total_despesas',
+                        color='tipoDespesa',
+                        title=f"Serie temporal de despesas - {deputado_selecionado}",
+                        labels={'dataDocumento': 'Data', 'total_despesas': 'Total de Despesas (R$)', 'tipoDespesa': 'Tipo de Despesa'},
+                        markers=True
+                    )
+                    fig.update_layout(hovermode='x unified', height=500)
+                    st.plotly_chart(fig, use_container_width=True)
+
+                st.subheader("📊 Resumo por tipo de despesa")
+                if {'tipoDespesa', 'total_despesas'}.issubset(df_deputado.columns):
+                    resumo = df_deputado.groupby('tipoDespesa', dropna=False)['total_despesas'].agg(['sum', 'mean']).round(2)
+                    resumo.columns = ['Total (R$)', 'Media (R$)']
+                    st.dataframe(resumo, use_container_width=True)
     else:
         st.error("Não foi possível carregar os dados de despesas.")
 
@@ -365,7 +451,7 @@ with tab3:
         if sumarizacoes:
             st.subheader("💡 Resumos e Insights")
             for idx, sumarizacao in enumerate(sumarizacoes, 1):
-                with st.container(border=True):
+                with st.container():
                     st.markdown(f"**#{idx}** {sumarizacao}")
         else:
             st.info("ℹ️ Nenhuma sumarização disponível")
@@ -388,6 +474,16 @@ with tab3:
                 st.metric("Período (dias)", dias_range)
     else:
         st.error("Não foi possível carregar as proposições.")
+
+
+# ============================================================================
+# ABA 4: ASSISTENTE
+# ============================================================================
+with tab4:
+    if render_assistant_tab is None:
+        st.error("Não foi possível carregar o assistente.")
+    else:
+        render_assistant_tab()
 
 
 # ============================================================================

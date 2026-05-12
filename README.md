@@ -77,6 +77,42 @@ Inicie o painel interativo:
 streamlit run online/dashboard.py
 ```
 
+## Validação Rápida
+
+Antes de subir commit/PR, rode os checks mínimos:
+
+```bash
+python tests/run_basic_checks.py
+python tests/run_assistant_checks.py
+```
+
+## Fluxo de Commit e PR
+
+### 1. Verificar mudanças
+```bash
+git status
+```
+
+### 2. Adicionar arquivos relevantes
+```bash
+git add .
+```
+
+### 3. Criar commit
+```bash
+git commit -m "feat: dashboard de despesas resiliente e assistente FAISS"
+```
+
+### 4. Subir branch
+```bash
+git push origin <nome-da-sua-branch>
+```
+
+### 5. Abrir PR
+- Abra a PR para a branch alvo do projeto.
+- Use o checklist em `docs/PR_CHECKLIST.md`.
+- Descreva: problema, solução aplicada, evidências (prints/logs), riscos.
+
 ## Contribuições
 Sugestões, melhorias e pull requests são bem-vindos. Certifique-se de seguir as diretrizes do projeto para contribuições.
 
