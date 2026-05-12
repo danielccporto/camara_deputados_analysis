@@ -104,17 +104,21 @@ def coletar_despesas_deputados():
     """
 
     df_deputados = pd.read_parquet("data/deputados.parquet")
-    ids_deputados = df_deputados["id"].tolist()
     despesas = []
 
-    # Iterar sobre os IDs dos deputados
-    for id_deputado in ids_deputados:
+    # Iterar sobre os deputados e preservar o nome para análises mais granulares
+    for _, deputado in df_deputados.iterrows():
+        id_deputado = deputado["id"]
+        nome_deputado = deputado.get("nome", deputado.get("nomeCivil", deputado.get("nomeParlamentar", str(id_deputado))))
         url = f"{URL_BASE}/deputados/{id_deputado}/despesas"
         response = requests.get(url)
         
         if response.status_code == 200:
-            # Adicionar os dados ao dataframe
-            despesas.extend(response.json().get("dados", []))
+            # Adicionar os dados ao dataframe com contexto do deputado
+            for despesa in response.json().get("dados", []):
+                despesa["idDeputado"] = id_deputado
+                despesa["nomeDeputado"] = nome_deputado
+                despesas.append(despesa)
         else:
             print(f"Erro ao acessar as despesas do deputado {id_deputado}: {response.status_code}")
 
@@ -126,24 +130,30 @@ def coletar_despesas_deputados():
         print("Nenhuma despesa foi coletada.")
         return
 
-    #Columns Check
-    #print("Colunas disponíveis no DataFrame de despesas:", df_despesas.columns.tolist())
-
-
     # Selecionar colunas relevantes
-    colunas_relevantes = ["dataDocumento", "nomeFornecedor", "tipoDespesa", "valorLiquido"]
+    colunas_relevantes = ["idDeputado", "nomeDeputado", "dataDocumento", "nomeFornecedor", "tipoDespesa", "valorLiquido"]
     df_despesas = df_despesas[colunas_relevantes]
 
     # Converter data para formato datetime
     df_despesas["dataDocumento"] = pd.to_datetime(df_despesas["dataDocumento"])
 
-    # Agrupar os dados por dia, deputado e tipo de despesa
-    df_agrupado = df_despesas.groupby(
-        ["dataDocumento", "tipoDespesa"]
+    # Salvar também uma visão detalhada por deputado para análises futuras
+    df_detalhado = df_despesas.groupby(
+        ["idDeputado", "nomeDeputado", "dataDocumento", "tipoDespesa", "nomeFornecedor"]
     ).agg(
         total_despesas=("valorLiquido", "sum"),
+    ).reset_index()
+
+    # Agrupar os dados por dia e tipo de despesa para o dashboard atual
+    df_agrupado = df_detalhado.groupby(
+        ["dataDocumento", "tipoDespesa"]
+    ).agg(
+        total_despesas=("total_despesas", "sum"),
         fornecedores=("nomeFornecedor", lambda x: list(set(x)))
     ).reset_index()
+
+    df_detalhado.to_parquet("data/despesas_deputados_detalhadas.parquet", index=False)
+    print("Dados detalhados salvos em data/despesas_deputados_detalhadas.parquet")
 
     # Salvar os dados no formato Parquet
     os.makedirs("data", exist_ok=True)

@@ -85,7 +85,7 @@ def render_overview_tab():
     
     if insights:
         for idx, insight in enumerate(insights, 1):
-            with st.container(border=True):
+            with st.container():
                 st.markdown(f"**Insight {idx}:**")
                 st.markdown(insight)
     else:
