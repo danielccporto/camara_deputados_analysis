@@ -472,6 +472,13 @@ with tab3:
             if 'dataApresentacao' in df_filtrado.columns:
                 dias_range = (df_filtrado['dataApresentacao'].max() - df_filtrado['dataApresentacao'].min()).days
                 st.metric("Período (dias)", dias_range)
+
+        st.divider()
+        st.subheader("🤖 Chat especialista em Câmara dos Deputados")
+        if render_assistant_tab is None:
+            st.error("Não foi possível carregar o assistente.")
+        else:
+            render_assistant_tab(show_title=False, key_prefix="proposicoes")
     else:
         st.error("Não foi possível carregar as proposições.")
 
@@ -483,7 +490,7 @@ with tab4:
     if render_assistant_tab is None:
         st.error("Não foi possível carregar o assistente.")
     else:
-        render_assistant_tab()
+        render_assistant_tab(key_prefix="assistente_tab")
 
 
 # ============================================================================

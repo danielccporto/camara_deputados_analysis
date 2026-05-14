@@ -10,18 +10,8 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-.streamlit/
-.ipynb_checkpoints/
 *.log
 docs/test_fig_*.png
 data/__pycache__/
 offline/__pycache__/
 tests/__pycache__/
-
-# Artefatos gerados localmente pelo assistente FAISS
-data/assistente_faiss.index
-data/assistente_faiss_docs.json
-data/assistente_faiss_vectorizer.joblib
-
-# Artefatos de diagnóstico local
-scripts/inspect_data.py
