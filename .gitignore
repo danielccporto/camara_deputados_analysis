@@ -10,13 +10,13 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-.streamlit/
-.ipynb_checkpoints/
 *.log
 docs/test_fig_*.png
 data/__pycache__/
 offline/__pycache__/
 tests/__pycache__/
+.streamlit/
+.ipynb_checkpoints/
 
 # Artefatos gerados localmente pelo assistente FAISS
 data/assistente_faiss.index
